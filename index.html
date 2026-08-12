@@ -8,22 +8,28 @@
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center;
       background: #090b1a; font-family: "Courier New", monospace; overflow: hidden;
     }
-    .cabinet { width: min(94vw, 540px); }
+    .cabinet {
+      width: min(94vw, 540px, calc((100dvh - 72px) * .75));
+    }
     canvas {
       display: block; width: 100%; height: auto; image-rendering: pixelated;
       border: 5px solid #f6e35b; box-shadow: 0 0 0 5px #252c68, 0 0 35px #63f7d2;
-      background: #15193a;
+      background: #15193a; touch-action: none; cursor: pointer;
     }
     .hint { margin: 16px 0 0; text-align: center; color: #9fa8df; font-size: 12px; letter-spacing: .08em; }
+    @media (max-width: 480px), (max-height: 520px) {
+      .cabinet { width: min(94vw, calc((100dvh - 62px) * .75)); }
+      .hint { margin-top: 12px; font-size: 10px; }
+    }
   </style>
 </head>
 <body>
   <main class="cabinet" aria-label="Juego Sky Jumper">
     <canvas id="game" width="480" height="640" aria-label="Sky Jumper. Usa espacio para jugar."></canvas>
-    <p class="hint">[ ESPACIO ] IMPULSO &nbsp;·&nbsp; ESCAPA ENTRE LAS TORRES</p>
+    <p class="hint">[ ESPACIO O TOCA LA PANTALLA ] IMPULSO</p>
   </main>
 
   <script>
@@ -161,7 +167,10 @@
         if (e.code === 'Space') { e.preventDefault(); jump(); }
         else if (state === 'gameover') jump();
       });
-      canvas.addEventListener('pointerdown', jump);
+      canvas.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        jump();
+      });
       loop();
     })();
   </script>
