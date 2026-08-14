@@ -3,23 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sky Jumper</title>
+  <title>Fly or Die · El bosque tranquilo</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
       margin: 0; min-height: 100vh; min-height: 100dvh; display: grid; place-items: center;
-      background: #090b1a; font-family: "Courier New", monospace; overflow: hidden;
+      background: #10251c; font-family: "Courier New", monospace; overflow: hidden;
     }
     .cabinet {
       width: min(94vw, 540px, calc((100dvh - 72px) * .75));
     }
     canvas {
       display: block; width: 100%; height: auto; image-rendering: pixelated;
-      border: 5px solid #f6e35b; box-shadow: 0 0 0 5px #252c68, 0 0 35px #63f7d2;
-      background: #15193a; touch-action: none; cursor: pointer;
+      border: 5px solid #d8bd67; box-shadow: 0 0 0 5px #315642, 0 0 35px #8fcf8a;
+      background: #9ed6dc; touch-action: none; cursor: pointer;
     }
-    .hint { margin: 16px 0 0; text-align: center; color: #9fa8df; font-size: 12px; letter-spacing: .08em; }
+    .hint { margin: 16px 0 0; text-align: center; color: #b8d9ad; font-size: 12px; letter-spacing: .08em; }
     @media (max-width: 480px), (max-height: 520px) {
       .cabinet { width: min(94vw, calc((100dvh - 62px) * .75)); }
       .hint { margin-top: 12px; font-size: 10px; }
@@ -27,8 +27,8 @@
   </style>
 </head>
 <body>
-  <main class="cabinet" aria-label="Juego Sky Jumper">
-    <canvas id="game" width="480" height="640" aria-label="Sky Jumper. Usa espacio para jugar."></canvas>
+  <main class="cabinet" aria-label="Juego Fly or Die, nivel El bosque tranquilo">
+    <canvas id="game" width="480" height="640" aria-label="Fly or Die. Usa espacio para jugar."></canvas>
     <p class="hint">[ ESPACIO O TOCA LA PANTALLA ] IMPULSO</p>
   </main>
 
@@ -39,8 +39,9 @@
       const W = canvas.width, H = canvas.height;
       const groundH = 54;
       const player = { x: 112, y: H / 2, size: 23, velocity: 0 };
-      const physics = { gravity: 0.32, flap: -5.65, speed: 2.25 };
-      let obstacles = [], score = 0, frame = 0, state = 'start', best = 0;
+      const physics = { gravity: 0.29, flap: -5.45, speed: 1.9 };
+      const level = { name: 'EL BOSQUE TRANQUILO', goal: 10, minGap: 188, maxGap: 202 };
+      let obstacles = [], score = 0, frame = 0, state = 'start', best = 0, musicStarted = false;
 
       try { best = Number(localStorage.getItem('skyJumperBest')) || 0; } catch (_) {}
 
@@ -55,14 +56,17 @@
 
       function jump() {
         if (state !== 'playing') { reset(); }
+        startForestMusic();
         player.velocity = physics.flap;
       }
 
       function addObstacle() {
-        const gap = Math.max(142, 178 - Math.min(score * 2, 28));
+        // A wide, almost constant opening makes this first lesson forgiving.
+        const gap = level.minGap + Math.random() * (level.maxGap - level.minGap);
         const minTop = 72;
         const maxTop = H - groundH - gap - 60;
-        obstacles.push({ x: W + 20, width: 56, top: minTop + Math.random() * (maxTop - minTop), gap, counted: false });
+        const top = minTop + Math.random() * (maxTop - minTop);
+        obstacles.push({ x: W + 20, width: 56, top, gap, branch: { collected: false } });
       }
 
       function gameOver() {
@@ -73,21 +77,47 @@
         }
       }
 
+      // A small, gentle two-note loop; it starts only after a player gesture.
+      function startForestMusic() {
+        if (musicStarted) return;
+        musicStarted = true;
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        const audio = new AudioContext();
+        const notes = [261.63, 329.63, 392, 329.63];
+        let note = 0;
+        setInterval(() => {
+          if (state !== 'playing') return;
+          const osc = audio.createOscillator(), gain = audio.createGain();
+          osc.type = 'sine'; osc.frequency.value = notes[note++ % notes.length];
+          gain.gain.setValueAtTime(.025, audio.currentTime);
+          gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .55);
+          osc.connect(gain).connect(audio.destination);
+          osc.start(); osc.stop(audio.currentTime + .58);
+        }, 700);
+      }
+
       function update() {
         if (state !== 'playing') return;
         frame++;
         player.velocity += physics.gravity;
         player.y += player.velocity;
-        if (frame % 92 === 0) addObstacle();
+        if (frame % 112 === 0) addObstacle();
 
         const px = player.x, py = player.y, ps = player.size;
         if (py < 0 || py + ps > H - groundH) gameOver();
         for (const o of obstacles) {
-          o.x -= physics.speed + Math.min(score * 0.018, .6);
-          if (!o.counted && o.x + o.width < px) { o.counted = true; score++; }
+          o.x -= physics.speed;
           const overlapX = px + ps > o.x && px < o.x + o.width;
           const inColumn = py < o.top || py + ps > o.top + o.gap;
           if (overlapX && inColumn) gameOver();
+          const bx = o.x + o.width / 2, by = o.top + o.gap / 2;
+          const reachesBranch = !o.branch.collected && px + ps > bx - 15 && px < bx + 15 && py + ps > by - 11 && py < by + 11;
+          if (reachesBranch) {
+            o.branch.collected = true;
+            score++;
+            if (score >= level.goal) gameOver(true);
+          }
         }
         obstacles = obstacles.filter(o => o.x + o.width > -10);
       }
@@ -99,28 +129,36 @@
       }
 
       function drawBackground() {
-        rect(0, 0, W, H, '#15193a');
-        // Pixel stars and a distant skyline.
-        const stars = [[28,72],[76,136],[145,55],[212,98],[270,42],[333,146],[411,78],[453,188],[46,282],[188,205],[302,264],[432,310]];
-        for (const [x, y] of stars) { rect(x, y, 3, 3, '#8f9eea'); if ((x + y) % 2 === 0) rect(x + 3, y + 3, 2, 2, '#5963aa'); }
-        rect(0, H - groundH - 48, W, 48, '#1e2555');
-        for (let x = 0; x < W; x += 31) {
-          const h = 15 + ((x * 7) % 33);
-          rect(x, H - groundH - h, 23, h, '#272f67');
-          rect(x + 5, H - groundH - h + 8, 4, 5, '#515aa2');
+        rect(0, 0, W, H, '#9ed6dc');
+        rect(0, 300, W, H - 300, '#76b876');
+        // Soft layers of trees keep the forest calm and readable.
+        for (let x = -20; x < W + 30; x += 54) {
+          const h = 92 + ((x * 13) % 54);
+          rect(x + 20, H - groundH - h, 12, h, '#547c4b');
+          rect(x, H - groundH - h + 18, 52, 35, '#4e9358');
+          rect(x + 8, H - groundH - h, 37, 34, '#5ca963');
         }
       }
 
       function drawColumn(o) {
         const bottomY = o.top + o.gap;
-        rect(o.x, 0, o.width, o.top, '#eb4b8c');
-        rect(o.x + 6, 0, 9, o.top, '#ff8cbd');
-        rect(o.x + o.width - 7, 0, 7, o.top, '#9f245c');
-        rect(o.x - 5, o.top - 15, o.width + 10, 15, '#ffcc55');
-        rect(o.x, bottomY, o.width, H - groundH - bottomY, '#eb4b8c');
-        rect(o.x + 6, bottomY, 9, H - groundH - bottomY, '#ff8cbd');
-        rect(o.x + o.width - 7, bottomY, 7, H - groundH - bottomY, '#9f245c');
-        rect(o.x - 5, bottomY, o.width + 10, 15, '#ffcc55');
+        rect(o.x, 0, o.width, o.top, '#5a9d52');
+        rect(o.x + 6, 0, 9, o.top, '#8acb70');
+        rect(o.x + o.width - 7, 0, 7, o.top, '#397340');
+        rect(o.x - 5, o.top - 15, o.width + 10, 15, '#b6da6a');
+        rect(o.x, bottomY, o.width, H - groundH - bottomY, '#5a9d52');
+        rect(o.x + 6, bottomY, 9, H - groundH - bottomY, '#8acb70');
+        rect(o.x + o.width - 7, bottomY, 7, H - groundH - bottomY, '#397340');
+        rect(o.x - 5, bottomY, o.width + 10, 15, '#b6da6a');
+        if (!o.branch.collected) drawBranch(o.x + o.width / 2, o.top + o.gap / 2);
+      }
+
+      function drawBranch(x, y) {
+        rect(x - 14, y - 2, 28, 5, '#75492d');
+        rect(x - 6, y - 8, 5, 13, '#75492d');
+        rect(x + 5, y - 5, 5, 10, '#75492d');
+        rect(x - 10, y - 8, 7, 5, '#9dcb55');
+        rect(x + 5, y - 9, 8, 5, '#9dcb55');
       }
 
       function drawPlayer() {
@@ -129,25 +167,25 @@
         if (state === 'playing' && player.velocity < -1) {
           rect(x - 7, y + 10, 7, 5, '#ffbc4a'); rect(x - 11, y + 11, 5, 3, '#f45b69');
         }
-        rect(x, y, player.size, player.size, '#63f7d2');
-        rect(x + 3, y + 3, player.size - 6, player.size - 6, '#2bb9b8');
-        rect(x + 14, y + 6, 5, 5, '#10142d');
+        rect(x, y, player.size, player.size, '#f3c85b');
+        rect(x + 3, y + 3, player.size - 6, player.size - 6, '#e99645');
+        rect(x + 14, y + 6, 5, 5, '#172b2c');
         rect(x + 16, y + 6, 2, 2, '#ffffff');
         rect(x + 4, y + player.size, 5, 4, '#f6e35b');
       }
 
       function drawGround() {
-        rect(0, H - groundH, W, groundH, '#0e1130');
-        rect(0, H - groundH, W, 8, '#f6e35b');
+        rect(0, H - groundH, W, groundH, '#3c7042');
+        rect(0, H - groundH, W, 8, '#b4d568');
         for (let x = -((frame * 2) % 24); x < W; x += 24) {
-          rect(x, H - 31, 13, 5, '#343e82'); rect(x + 5, H - 17, 13, 5, '#343e82');
+          rect(x, H - 31, 13, 5, '#5e914d'); rect(x + 5, H - 17, 13, 5, '#5e914d');
         }
       }
 
       function panel(title, lines) {
-        rect(35, 206, W - 70, 168, '#090b1a');
-        ctx.strokeStyle = '#63f7d2'; ctx.lineWidth = 4; ctx.strokeRect(37, 208, W - 74, 164);
-        text(title, W / 2, 252, 28, '#f6e35b', 'center');
+        rect(35, 206, W - 70, 168, '#173d31');
+        ctx.strokeStyle = '#b4d568'; ctx.lineWidth = 4; ctx.strokeRect(37, 208, W - 74, 164);
+        text(title, W / 2, 252, 24, '#f2d477', 'center');
         lines.forEach((line, i) => text(line, W / 2, 298 + i * 28, 15, '#ffffff', 'center'));
       }
 
@@ -156,10 +194,10 @@
         obstacles.forEach(drawColumn);
         drawGround();
         drawPlayer();
-        text('SKY JUMPER', 18, 29, 18, '#63f7d2');
-        text(String(score).padStart(2, '0'), W - 18, 30, 25, '#f6e35b', 'right');
-        if (state === 'start') panel('SKY JUMPER', ['PRESIONA ESPACIO', 'PARA COMENZAR']);
-        if (state === 'gameover') panel('GAME OVER', [`PUNTAJE: ${score}`, `RÉCORD: ${best}`, 'PRESIONA UNA TECLA']);
+        text('NIVEL 1 · BOSQUE', 18, 29, 16, '#285340');
+        text(`RAMITAS ${score}/${level.goal}`, W - 18, 30, 17, '#285340', 'right');
+        if (state === 'start') panel('EL BOSQUE TRANQUILO', ['RECOGE LAS RAMITAS', 'EN EL CENTRO DEL HUECO']);
+        if (state === 'gameover') panel(score >= level.goal ? '¡NIVEL SUPERADO!' : 'INTÉNTALO DE NUEVO', [score >= level.goal ? '¡10 RAMITAS RECOGIDAS!' : `RAMITAS: ${score}/${level.goal}`, 'PRESIONA PARA JUGAR']);
       }
 
       function loop() { update(); draw(); requestAnimationFrame(loop); }
