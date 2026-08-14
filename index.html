@@ -27,7 +27,7 @@
   </style>
 </head>
 <body>
-  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo, La tormenta y Noche a ciegas">
+  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo, La tormenta, Noche a ciegas y El amanecer">
     <canvas id="game" width="480" height="640" aria-label="Fly or Die. Usa espacio para jugar."></canvas>
     <p class="hint">[ ESPACIO O TOCA LA PANTALLA ] IMPULSO</p>
   </main>
@@ -43,7 +43,8 @@
       const levels = [
         { name: 'EL BOSQUE TRANQUILO', short: 'BOSQUE', goal: 10, minGap: 188, maxGap: 202, speed: 1.9, storm: false, night: false },
         { name: 'LA TORMENTA', short: 'TORMENTA', goal: 20, minGap: 172, maxGap: 190, speed: 2.08, storm: true, night: false },
-        { name: 'NOCHE A CIEGAS', short: 'NOCHE', goal: 35, minGap: 160, maxGap: 176, speed: 2.12, gravity: .31, flap: -5.55, storm: false, night: true }
+        { name: 'NOCHE A CIEGAS', short: 'NOCHE', goal: 30, minGap: 160, maxGap: 176, speed: 2.12, gravity: .31, flap: -5.55, storm: false, night: true },
+        { name: 'EL AMANECER', short: 'AMANECER', goal: 40, minGap: 154, maxGap: 170, speed: 2.2, gravity: .31, flap: -5.55, storm: false, night: false }
       ];
       const wind = { active: false, force: 0, endsAt: 0, nextAt: 420, direction: 0 };
       let obstacles = [], leaves = [], score = 0, frame = 0, nightStartFrame = 0, state = 'start', best = 0, musicStarted = false;
@@ -120,16 +121,15 @@
       }
 
       function currentLevel() {
-        if (score >= levels[1].goal) return levels[2];
-        return score >= levels[0].goal ? levels[1] : levels[0];
+        return levels.find(level => score < level.goal) || levels[levels.length - 1];
       }
 
-      function enterNight() {
+      function enterLevel() {
         obstacles = [];
         leaves = [];
         wind.active = false;
         wind.force = 0;
-        nightStartFrame = frame;
+        if (currentLevel().night) nightStartFrame = frame;
       }
 
       function updateWind(level) {
@@ -190,11 +190,12 @@
           if (reachesBranch) {
             o.branch.collected = true;
             score++;
-            if (score === levels[1].goal) {
-              enterNight();
+            if (score >= levels[levels.length - 1].goal) {
+              gameOver(true);
+            } else if (levels.some(level => score === level.goal)) {
+              enterLevel();
               return;
             }
-            else if (score >= levels[2].goal) gameOver(true);
           }
         }
         obstacles = obstacles.filter(o => o.x + o.width > -10);
@@ -376,14 +377,13 @@
         drawPlayer();
         drawWindSignal();
         const level = currentLevel();
-        const levelNumber = level.night ? '3' : level.storm ? '2' : '1';
-        const startScore = level.night ? levels[1].goal : level.storm ? levels[0].goal : 0;
+        const levelNumber = String(levels.indexOf(level) + 1);
         const hudColor = level.night ? '#d2e09a' : level.storm ? '#edf4d7' : '#285340';
         text(`NIVEL ${levelNumber} · ${level.short}`, 18, 29, 16, hudColor);
-        text(`RAMITAS ${score - startScore}/${level.goal - startScore}`, W - 18, 30, 17, hudColor, 'right');
+        text(`RAMITAS ${score}/${levels[levels.length - 1].goal}`, W - 18, 30, 17, hudColor, 'right');
         if (isBlackout()) text('¡A OSCURAS!', W / 2, 60, 15, '#f2df80', 'center');
         if (state === 'start') panel('EL BOSQUE TRANQUILO', ['RECOGE LAS RAMITAS', 'EN EL CENTRO DEL HUECO']);
-        if (state === 'gameover') panel('INTÉNTALO DE NUEVO', [`RAMITAS: ${score - startScore}/${level.goal - startScore}`, 'PRESIONA PARA JUGAR']);
+        if (state === 'gameover') panel('INTÉNTALO DE NUEVO', [`RAMITAS: ${score}/${levels[levels.length - 1].goal}`, 'PRESIONA PARA JUGAR']);
         if (state === 'won') panel('¡JUEGO SUPERADO!', ['¡DOMINASTE LA OSCURIDAD!', 'PRESIONA PARA JUGAR']);
       }
 
