@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fly or Die · La tormenta</title>
+  <title>Fly or Die</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -27,7 +27,7 @@
   </style>
 </head>
 <body>
-  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo y La tormenta">
+  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo, La tormenta y Noche a ciegas">
     <canvas id="game" width="480" height="640" aria-label="Fly or Die. Usa espacio para jugar."></canvas>
     <p class="hint">[ ESPACIO O TOCA LA PANTALLA ] IMPULSO</p>
   </main>
@@ -41,11 +41,12 @@
       const player = { x: 112, y: H / 2, size: 23, velocity: 0 };
       const physics = { gravity: 0.29, flap: -5.45, speed: 1.9 };
       const levels = [
-        { name: 'EL BOSQUE TRANQUILO', short: 'BOSQUE', goal: 10, minGap: 188, maxGap: 202, speed: 1.9, storm: false },
-        { name: 'LA TORMENTA', short: 'TORMENTA', goal: 20, minGap: 172, maxGap: 190, speed: 2.08, storm: true }
+        { name: 'EL BOSQUE TRANQUILO', short: 'BOSQUE', goal: 10, minGap: 188, maxGap: 202, speed: 1.9, storm: false, night: false },
+        { name: 'LA TORMENTA', short: 'TORMENTA', goal: 20, minGap: 172, maxGap: 190, speed: 2.08, storm: true, night: false },
+        { name: 'NOCHE A CIEGAS', short: 'NOCHE', goal: 35, minGap: 160, maxGap: 176, speed: 2.12, gravity: .31, flap: -5.55, storm: false, night: true }
       ];
       const wind = { active: false, force: 0, endsAt: 0, nextAt: 420, direction: 0 };
-      let obstacles = [], leaves = [], score = 0, frame = 0, state = 'start', best = 0, musicStarted = false;
+      let obstacles = [], leaves = [], score = 0, frame = 0, nightStartFrame = 0, state = 'start', best = 0, musicStarted = false;
 
       try { best = Number(localStorage.getItem('skyJumperBest')) || 0; } catch (_) {}
 
@@ -56,6 +57,7 @@
         leaves = [];
         score = 0;
         frame = 0;
+        nightStartFrame = 0;
         wind.active = false;
         wind.force = 0;
         wind.endsAt = 0;
@@ -67,7 +69,7 @@
       function jump() {
         if (state !== 'playing') { reset(); }
         startForestMusic();
-        player.velocity = physics.flap;
+        player.velocity = currentLevel().flap || physics.flap;
       }
 
       function addObstacle() {
@@ -89,8 +91,8 @@
         });
       }
 
-      function gameOver() {
-        state = 'gameover';
+      function gameOver(won = false) {
+        state = won ? 'won' : 'gameover';
         if (score > best) {
           best = score;
           try { localStorage.setItem('skyJumperBest', best); } catch (_) {}
@@ -118,7 +120,16 @@
       }
 
       function currentLevel() {
+        if (score >= levels[1].goal) return levels[2];
         return score >= levels[0].goal ? levels[1] : levels[0];
+      }
+
+      function enterNight() {
+        obstacles = [];
+        leaves = [];
+        wind.active = false;
+        wind.force = 0;
+        nightStartFrame = frame;
       }
 
       function updateWind(level) {
@@ -161,10 +172,10 @@
         frame++;
         const level = currentLevel();
         updateWind(level);
-        player.velocity += physics.gravity;
+        player.velocity += level.gravity || physics.gravity;
         if (level.storm && wind.active) player.velocity += wind.force;
         player.y += player.velocity;
-        if (frame % 112 === 0) addObstacle();
+        if (frame % (level.night ? 98 : 112) === 0) addObstacle();
 
         const px = player.x, py = player.y, ps = player.size;
         if (py < 0 || py + ps > H - groundH) gameOver();
@@ -179,7 +190,11 @@
           if (reachesBranch) {
             o.branch.collected = true;
             score++;
-            if (score >= levels[1].goal) gameOver(true);
+            if (score === levels[1].goal) {
+              enterNight();
+              return;
+            }
+            else if (score >= levels[2].goal) gameOver(true);
           }
         }
         obstacles = obstacles.filter(o => o.x + o.width > -10);
@@ -193,7 +208,10 @@
 
       function drawBackground() {
         const level = currentLevel();
-        if (level.storm) {
+        if (level.night) {
+          rect(0, 0, W, H, '#10251f');
+          rect(0, 250, W, H - 250, '#0b1b18');
+        } else if (level.storm) {
           rect(0, 0, W, H, '#526b83');
           rect(0, 240, W, H - 240, '#4f7664');
           for (let y = 18; y < H - groundH; y += 31) {
@@ -206,31 +224,42 @@
         // Soft layers of trees keep the forest calm and readable.
         for (let x = -20; x < W + 30; x += 54) {
           const h = 92 + ((x * 13) % 54);
-          rect(x + 20, H - groundH - h, 12, h, level.storm ? '#3f5a4d' : '#547c4b');
-          rect(x, H - groundH - h + 18, 52, 35, level.storm ? '#456f57' : '#4e9358');
-          rect(x + 8, H - groundH - h, 37, 34, level.storm ? '#537f63' : '#5ca963');
+          const trunk = level.night ? '#183d31' : level.storm ? '#3f5a4d' : '#547c4b';
+          const leaves = level.night ? '#23513f' : level.storm ? '#456f57' : '#4e9358';
+          rect(x + 20, H - groundH - h, 12, h, trunk);
+          rect(x, H - groundH - h + 18, 52, 35, leaves);
+          rect(x + 8, H - groundH - h, 37, 34, level.night ? '#2a6149' : level.storm ? '#537f63' : '#5ca963');
         }
       }
 
       function drawColumn(o) {
         const bottomY = o.top + o.gap;
-        rect(o.x, 0, o.width, o.top, '#5a9d52');
-        rect(o.x + 6, 0, 9, o.top, '#8acb70');
-        rect(o.x + o.width - 7, 0, 7, o.top, '#397340');
-        rect(o.x - 5, o.top - 15, o.width + 10, 15, '#b6da6a');
-        rect(o.x, bottomY, o.width, H - groundH - bottomY, '#5a9d52');
-        rect(o.x + 6, bottomY, 9, H - groundH - bottomY, '#8acb70');
-        rect(o.x + o.width - 7, bottomY, 7, H - groundH - bottomY, '#397340');
-        rect(o.x - 5, bottomY, o.width + 10, 15, '#b6da6a');
+        const level = currentLevel();
+        const colors = level.night ? ['#285e46', '#448668', '#173d31', '#78a957'] : ['#5a9d52', '#8acb70', '#397340', '#b6da6a'];
+        rect(o.x, 0, o.width, o.top, colors[0]);
+        rect(o.x + 6, 0, 9, o.top, colors[1]);
+        rect(o.x + o.width - 7, 0, 7, o.top, colors[2]);
+        rect(o.x - 5, o.top - 15, o.width + 10, 15, colors[3]);
+        rect(o.x, bottomY, o.width, H - groundH - bottomY, colors[0]);
+        rect(o.x + 6, bottomY, 9, H - groundH - bottomY, colors[1]);
+        rect(o.x + o.width - 7, bottomY, 7, H - groundH - bottomY, colors[2]);
+        rect(o.x - 5, bottomY, o.width + 10, 15, colors[3]);
         if (!o.branch.collected) drawBranch(o.x + o.width / 2, o.top + o.gap / 2 + o.branch.offset);
       }
 
-      function drawBranch(x, y) {
-        rect(x - 14, y - 2, 28, 5, '#75492d');
-        rect(x - 6, y - 8, 5, 13, '#75492d');
-        rect(x + 5, y - 5, 5, 10, '#75492d');
-        rect(x - 10, y - 8, 7, 5, '#9dcb55');
-        rect(x + 5, y - 9, 8, 5, '#9dcb55');
+      function drawBranch(x, y, glowOnly = false) {
+        if (!glowOnly) {
+          rect(x - 14, y - 2, 28, 5, '#75492d');
+          rect(x - 6, y - 8, 5, 13, '#75492d');
+          rect(x + 5, y - 5, 5, 10, '#75492d');
+        }
+        const leaf = currentLevel().night ? '#e0e886' : '#9dcb55';
+        rect(x - 10, y - 8, 7, 5, leaf);
+        rect(x + 5, y - 9, 8, 5, leaf);
+        if (currentLevel().night) {
+          rect(x - 7, y - 6, 4, 3, '#fbffc0');
+          rect(x + 7, y - 7, 4, 3, '#fbffc0');
+        }
       }
 
       function drawPlayer() {
@@ -248,10 +277,13 @@
 
       function drawGround() {
         const level = currentLevel();
-        rect(0, H - groundH, W, groundH, level.storm ? '#2f5748' : '#3c7042');
-        rect(0, H - groundH, W, 8, level.storm ? '#8fbf7a' : '#b4d568');
+        const ground = level.night ? '#173d31' : level.storm ? '#2f5748' : '#3c7042';
+        const grass = level.night ? '#769c56' : level.storm ? '#8fbf7a' : '#b4d568';
+        const tiles = level.night ? '#285941' : level.storm ? '#496f50' : '#5e914d';
+        rect(0, H - groundH, W, groundH, ground);
+        rect(0, H - groundH, W, 8, grass);
         for (let x = -((frame * 2) % 24); x < W; x += 24) {
-          rect(x, H - 31, 13, 5, level.storm ? '#496f50' : '#5e914d'); rect(x + 5, H - 17, 13, 5, level.storm ? '#496f50' : '#5e914d');
+          rect(x, H - 31, 13, 5, tiles); rect(x + 5, H - 17, 13, 5, tiles);
         }
       }
 
@@ -274,6 +306,53 @@
         rect(W - 39, arrowY + (wind.direction < 0 ? -10 : 6), 15, 5, '#f2d477');
       }
 
+      function nightFrame() { return frame - nightStartFrame; }
+
+      function fireflies() {
+        const cycle = nightFrame() % 580;
+        if (!currentLevel().night || state !== 'playing' || cycle < 145 || cycle > 295) return [];
+        const fade = Math.min(1, (cycle - 145) / 24, (295 - cycle) / 24);
+        const drift = (cycle - 145) * .16;
+        return [
+          { x: 285 + Math.sin(drift) * 22, y: 230 + Math.cos(drift * .8) * 34, fade },
+          { x: 350 + Math.sin(drift * .7 + 2) * 28, y: 365 + Math.cos(drift) * 30, fade },
+          { x: 416 + Math.sin(drift * .9 + 1) * 19, y: 185 + Math.cos(drift * .6) * 36, fade }
+        ];
+      }
+
+      function isBlackout() {
+        const cycle = nightFrame() % 900;
+        return currentLevel().night && state === 'playing' && cycle >= 675 && cycle < 755;
+      }
+
+      function clearLight(x, y, radius, strength = 1) {
+        const light = ctx.createRadialGradient(x, y, radius * .2, x, y, radius);
+        light.addColorStop(0, `rgba(0,0,0,${strength})`);
+        light.addColorStop(.65, `rgba(0,0,0,${strength * .72})`);
+        light.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = light;
+        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+      }
+
+      function drawFog(flies) {
+        if (!currentLevel().night) return;
+        ctx.save();
+        ctx.fillStyle = isBlackout() ? 'rgba(0,4,5,.97)' : 'rgba(1,10,9,.88)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalCompositeOperation = 'destination-out';
+        clearLight(player.x + player.size / 2, player.y + player.size / 2, isBlackout() ? 42 : 108);
+        flies.forEach(fly => clearLight(fly.x, fly.y, 150, fly.fade));
+        ctx.restore();
+      }
+
+      function drawFireflies(flies) {
+        flies.forEach(fly => {
+          const pulse = 2 + Math.sin(frame * .22 + fly.x) * .7;
+          rect(fly.x - pulse, fly.y - pulse, pulse * 2, pulse * 2, '#d8ff71');
+          rect(fly.x - 1, fly.y - 1, 2, 2, '#fff');
+        });
+      }
+
       function panel(title, lines) {
         rect(35, 206, W - 70, 168, '#173d31');
         ctx.strokeStyle = '#b4d568'; ctx.lineWidth = 4; ctx.strokeRect(37, 208, W - 74, 164);
@@ -286,14 +365,26 @@
         drawLeaves();
         obstacles.forEach(drawColumn);
         drawGround();
+        const flies = fireflies();
+        drawFog(flies);
+        if (currentLevel().night) {
+          obstacles.forEach(o => {
+            if (!o.branch.collected) drawBranch(o.x + o.width / 2, o.top + o.gap / 2 + o.branch.offset, true);
+          });
+        }
+        drawFireflies(flies);
         drawPlayer();
         drawWindSignal();
         const level = currentLevel();
-        const hudColor = level.storm ? '#edf4d7' : '#285340';
-        text(`NIVEL ${level.storm ? '2' : '1'} · ${level.short}`, 18, 29, 16, hudColor);
-        text(`RAMITAS ${score}/${levels[1].goal}`, W - 18, 30, 17, hudColor, 'right');
+        const levelNumber = level.night ? '3' : level.storm ? '2' : '1';
+        const startScore = level.night ? levels[1].goal : level.storm ? levels[0].goal : 0;
+        const hudColor = level.night ? '#d2e09a' : level.storm ? '#edf4d7' : '#285340';
+        text(`NIVEL ${levelNumber} · ${level.short}`, 18, 29, 16, hudColor);
+        text(`RAMITAS ${score - startScore}/${level.goal - startScore}`, W - 18, 30, 17, hudColor, 'right');
+        if (isBlackout()) text('¡A OSCURAS!', W / 2, 60, 15, '#f2df80', 'center');
         if (state === 'start') panel('EL BOSQUE TRANQUILO', ['RECOGE LAS RAMITAS', 'EN EL CENTRO DEL HUECO']);
-        if (state === 'gameover') panel(score >= levels[1].goal ? '¡JUEGO SUPERADO!' : 'INTÉNTALO DE NUEVO', [score >= levels[1].goal ? '¡SOBREVIVISTE LA TORMENTA!' : `RAMITAS: ${score}/${levels[1].goal}`, 'PRESIONA PARA JUGAR']);
+        if (state === 'gameover') panel('INTÉNTALO DE NUEVO', [`RAMITAS: ${score - startScore}/${level.goal - startScore}`, 'PRESIONA PARA JUGAR']);
+        if (state === 'won') panel('¡JUEGO SUPERADO!', ['¡DOMINASTE LA OSCURIDAD!', 'PRESIONA PARA JUGAR']);
       }
 
       function loop() { update(); draw(); requestAnimationFrame(loop); }
