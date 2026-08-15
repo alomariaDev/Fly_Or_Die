@@ -27,7 +27,7 @@
   </style>
 </head>
 <body>
-  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo, La tormenta, Noche a ciegas y El amanecer">
+  <main class="cabinet" aria-label="Juego Fly or Die, niveles El bosque tranquilo, La tormenta, Noche a ciegas y El volcán">
     <canvas id="game" width="480" height="640" aria-label="Fly or Die. Usa espacio para jugar."></canvas>
     <p class="hint">[ ESPACIO O TOCA LA PANTALLA ] IMPULSO</p>
   </main>
@@ -44,9 +44,10 @@
         { name: 'EL BOSQUE TRANQUILO', short: 'BOSQUE', goal: 10, minGap: 188, maxGap: 202, speed: 1.9, storm: false, night: false },
         { name: 'LA TORMENTA', short: 'TORMENTA', goal: 20, minGap: 172, maxGap: 190, speed: 2.08, storm: true, night: false },
         { name: 'NOCHE A CIEGAS', short: 'NOCHE', goal: 30, minGap: 160, maxGap: 176, speed: 2.12, gravity: .31, flap: -5.55, storm: false, night: true },
-        { name: 'EL AMANECER', short: 'AMANECER', goal: 40, minGap: 154, maxGap: 170, speed: 2.2, gravity: .31, flap: -5.55, storm: false, night: false }
+        { name: 'EL VOLCÁN', short: 'VOLCÁN', goal: 40, minGap: 154, maxGap: 170, speed: 2.2, gravity: .31, flap: -5.55, storm: false, night: false, volcano: true }
       ];
       const wind = { active: false, force: 0, endsAt: 0, nextAt: 420, direction: 0 };
+      const volcano = { active: false, startedAt: 0, endsAt: 0, nextAt: 260, shake: 0, pulse: 0 };
       let obstacles = [], leaves = [], score = 0, frame = 0, nightStartFrame = 0, state = 'start', best = 0, musicStarted = false;
 
       try { best = Number(localStorage.getItem('skyJumperBest')) || 0; } catch (_) {}
@@ -64,6 +65,10 @@
         wind.endsAt = 0;
         wind.nextAt = 420;
         wind.direction = 0;
+        volcano.active = false;
+        volcano.shake = 0;
+        volcano.pulse = 0;
+        volcano.nextAt = 260;
         state = 'playing';
       }
 
@@ -81,6 +86,8 @@
         const maxTop = H - groundH - gap - 60;
         const top = minTop + Math.random() * (maxTop - minTop);
         const branchOffset = level.storm ? (Math.random() < .5 ? -1 : 1) * (18 + Math.random() * 20) : 0;
+        const shiftOffset = level.volcano ? (Math.random() < .5 ? -1 : 1) * (24 + Math.random() * 26) : 0;
+        const burning = level.volcano && Math.random() < .35;
         obstacles.push({
           x: W + 20,
           width: 56,
@@ -88,7 +95,8 @@
           baseTop: top,
           gap,
           swaySeed: Math.random() * Math.PI * 2,
-          branch: { collected: false, offset: branchOffset }
+          shiftOffset,
+          branch: { collected: false, offset: branchOffset, burning }
         });
       }
 
@@ -129,6 +137,10 @@
         leaves = [];
         wind.active = false;
         wind.force = 0;
+        volcano.active = false;
+        volcano.shake = 0;
+        volcano.pulse = 0;
+        volcano.nextAt = frame + 200 + Math.floor(Math.random() * 80);
         if (currentLevel().night) nightStartFrame = frame;
       }
 
@@ -167,11 +179,43 @@
         leaves = leaves.filter(leaf => leaf.x > -18 && leaf.y > 28 && leaf.y < H - groundH + 12);
       }
 
+      // Every so often the ground shakes: nearby columns lurch sideways and
+      // the player has a brief window to react before they settle back.
+      function updateVolcano(level) {
+        if (!level.volcano) {
+          volcano.active = false;
+          volcano.shake = 0;
+          volcano.pulse = 0;
+          return;
+        }
+        if (!volcano.active && frame >= volcano.nextAt) {
+          volcano.active = true;
+          volcano.startedAt = frame;
+          volcano.endsAt = frame + 70;
+          obstacles.forEach(o => {
+            o.shiftOffset = (Math.random() < .5 ? -1 : 1) * (24 + Math.random() * 26);
+          });
+        }
+        if (volcano.active) {
+          volcano.pulse = Math.sin(((frame - volcano.startedAt) / (volcano.endsAt - volcano.startedAt)) * Math.PI);
+          volcano.shake = volcano.pulse * 6;
+          if (frame >= volcano.endsAt) {
+            volcano.active = false;
+            volcano.shake = 0;
+            volcano.pulse = 0;
+            volcano.nextAt = frame + 260 + Math.floor(Math.random() * 200);
+          }
+        } else {
+          volcano.pulse = 0;
+        }
+      }
+
       function update() {
         if (state !== 'playing') return;
         frame++;
         const level = currentLevel();
         updateWind(level);
+        updateVolcano(level);
         player.velocity += level.gravity || physics.gravity;
         if (level.storm && wind.active) player.velocity += wind.force;
         player.y += player.velocity;
@@ -182,6 +226,7 @@
         for (const o of obstacles) {
           o.x -= level.speed;
           if (level.storm) o.top = o.baseTop + Math.sin(frame * .035 + o.swaySeed) * 9;
+          else if (level.volcano) o.top = o.baseTop + o.shiftOffset * volcano.pulse;
           const overlapX = px + ps > o.x && px < o.x + o.width;
           const inColumn = py < o.top || py + ps > o.top + o.gap;
           if (overlapX && inColumn) gameOver();
@@ -189,12 +234,19 @@
           const reachesBranch = !o.branch.collected && px + ps > bx - 15 && px < bx + 15 && py + ps > by - 11 && py < by + 11;
           if (reachesBranch) {
             o.branch.collected = true;
-            score++;
-            if (score >= levels[levels.length - 1].goal) {
-              gameOver(true);
-            } else if (levels.some(level => score === level.goal)) {
-              enterLevel();
-              return;
+            if (o.branch.burning) {
+              // Never drop back below the goal that unlocked this level.
+              const levelIndex = levels.indexOf(level);
+              const floor = levelIndex > 0 ? levels[levelIndex - 1].goal : 0;
+              score = Math.max(floor, score - 1);
+            } else {
+              score++;
+              if (score >= levels[levels.length - 1].goal) {
+                gameOver(true);
+              } else if (levels.some(level => score === level.goal)) {
+                enterLevel();
+                return;
+              }
             }
           }
         }
@@ -209,7 +261,13 @@
 
       function drawBackground() {
         const level = currentLevel();
-        if (level.night) {
+        if (level.volcano) {
+          rect(0, 0, W, H, '#2a0f0c');
+          rect(0, 220, W, H - 220, '#160705');
+          const glow = .55 + Math.sin(frame * .05) * .12 + volcano.shake * .02;
+          ctx.fillStyle = `rgba(255,106,38,${Math.max(.2, glow)})`;
+          ctx.fillRect(0, H - groundH - 70, W, 70);
+        } else if (level.night) {
           rect(0, 0, W, H, '#10251f');
           rect(0, 250, W, H - 250, '#0b1b18');
         } else if (level.storm) {
@@ -221,6 +279,17 @@
         } else {
           rect(0, 0, W, H, '#9ed6dc');
           rect(0, 300, W, H - 300, '#76b876');
+        }
+        if (level.volcano) {
+          // Jagged basalt spires with a glowing crack replace the treeline.
+          for (let x = -20; x < W + 30; x += 54) {
+            const h = 92 + ((x * 13) % 54);
+            rect(x + 20, H - groundH - h, 12, h, '#241210');
+            rect(x, H - groundH - h + 18, 52, 35, '#3a1a14');
+            rect(x + 8, H - groundH - h, 37, 34, '#5a2618');
+            rect(x + 16, H - groundH - h - 6, 6, 10, '#ff8a3d');
+          }
+          return;
         }
         // Soft layers of trees keep the forest calm and readable.
         for (let x = -20; x < W + 30; x += 54) {
@@ -236,7 +305,7 @@
       function drawColumn(o) {
         const bottomY = o.top + o.gap;
         const level = currentLevel();
-        const colors = level.night ? ['#285e46', '#448668', '#173d31', '#78a957'] : ['#5a9d52', '#8acb70', '#397340', '#b6da6a'];
+        const colors = level.volcano ? ['#4a2016', '#7a3a24', '#2a120c', '#ff8a3d'] : level.night ? ['#285e46', '#448668', '#173d31', '#78a957'] : ['#5a9d52', '#8acb70', '#397340', '#b6da6a'];
         rect(o.x, 0, o.width, o.top, colors[0]);
         rect(o.x + 6, 0, 9, o.top, colors[1]);
         rect(o.x + o.width - 7, 0, 7, o.top, colors[2]);
@@ -245,14 +314,21 @@
         rect(o.x + 6, bottomY, 9, H - groundH - bottomY, colors[1]);
         rect(o.x + o.width - 7, bottomY, 7, H - groundH - bottomY, colors[2]);
         rect(o.x - 5, bottomY, o.width + 10, 15, colors[3]);
-        if (!o.branch.collected) drawBranch(o.x + o.width / 2, o.top + o.gap / 2 + o.branch.offset);
+        if (!o.branch.collected) drawBranch(o.x + o.width / 2, o.top + o.gap / 2 + o.branch.offset, false, o.branch.burning);
       }
 
-      function drawBranch(x, y, glowOnly = false) {
+      function drawBranch(x, y, glowOnly = false, burning = false) {
         if (!glowOnly) {
-          rect(x - 14, y - 2, 28, 5, '#75492d');
-          rect(x - 6, y - 8, 5, 13, '#75492d');
-          rect(x + 5, y - 5, 5, 10, '#75492d');
+          rect(x - 14, y - 2, 28, 5, burning ? '#3a1c12' : '#75492d');
+          rect(x - 6, y - 8, 5, 13, burning ? '#3a1c12' : '#75492d');
+          rect(x + 5, y - 5, 5, 10, burning ? '#3a1c12' : '#75492d');
+        }
+        if (burning) {
+          rect(x - 10, y - 10, 7, 6, '#ff8a3d');
+          rect(x + 5, y - 11, 8, 6, '#ff8a3d');
+          rect(x - 7, y - 6, 4, 4, '#ffd25e');
+          rect(x + 7, y - 7, 4, 4, '#ffd25e');
+          return;
         }
         const leaf = currentLevel().night ? '#e0e886' : '#9dcb55';
         rect(x - 10, y - 8, 7, 5, leaf);
@@ -278,9 +354,9 @@
 
       function drawGround() {
         const level = currentLevel();
-        const ground = level.night ? '#173d31' : level.storm ? '#2f5748' : '#3c7042';
-        const grass = level.night ? '#769c56' : level.storm ? '#8fbf7a' : '#b4d568';
-        const tiles = level.night ? '#285941' : level.storm ? '#496f50' : '#5e914d';
+        const ground = level.volcano ? '#1c0d0a' : level.night ? '#173d31' : level.storm ? '#2f5748' : '#3c7042';
+        const grass = level.volcano ? '#ff8a3d' : level.night ? '#769c56' : level.storm ? '#8fbf7a' : '#b4d568';
+        const tiles = level.volcano ? '#3a1a12' : level.night ? '#285941' : level.storm ? '#496f50' : '#5e914d';
         rect(0, H - groundH, W, groundH, ground);
         rect(0, H - groundH, W, 8, grass);
         for (let x = -((frame * 2) % 24); x < W; x += 24) {
@@ -305,6 +381,12 @@
         const arrowY = y + (wind.direction < 0 ? -8 : 8);
         rect(W - 34, arrowY - 8, 5, 16, '#f2d477');
         rect(W - 39, arrowY + (wind.direction < 0 ? -10 : 6), 15, 5, '#f2d477');
+      }
+
+      function drawEruptionWarning() {
+        if (!currentLevel().volcano || !volcano.active) return;
+        rect(W / 2 - 82, 76, 164, 34, '#3a1208');
+        text('¡TEMBLOR!', W / 2, 93, 15, '#ffb35e', 'center');
       }
 
       function nightFrame() { return frame - nightStartFrame; }
@@ -362,6 +444,9 @@
       }
 
       function draw() {
+        const shake = volcano.active ? volcano.shake * (Math.random() < .5 ? -1 : 1) : 0;
+        ctx.save();
+        ctx.translate(shake, 0);
         drawBackground();
         drawLeaves();
         obstacles.forEach(drawColumn);
@@ -375,10 +460,12 @@
         }
         drawFireflies(flies);
         drawPlayer();
+        ctx.restore();
         drawWindSignal();
+        drawEruptionWarning();
         const level = currentLevel();
         const levelNumber = String(levels.indexOf(level) + 1);
-        const hudColor = level.night ? '#d2e09a' : level.storm ? '#edf4d7' : '#285340';
+        const hudColor = level.volcano ? '#ffd8a8' : level.night ? '#d2e09a' : level.storm ? '#edf4d7' : '#285340';
         text(`NIVEL ${levelNumber} · ${level.short}`, 18, 29, 16, hudColor);
         text(`RAMITAS ${score}/${levels[levels.length - 1].goal}`, W - 18, 30, 17, hudColor, 'right');
         if (isBlackout()) text('¡A OSCURAS!', W / 2, 60, 15, '#f2df80', 'center');
