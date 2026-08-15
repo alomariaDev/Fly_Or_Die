@@ -44,11 +44,11 @@
         { name: 'EL BOSQUE TRANQUILO', short: 'BOSQUE', goal: 10, minGap: 188, maxGap: 202, speed: 1.9, storm: false, night: false },
         { name: 'LA TORMENTA', short: 'TORMENTA', goal: 20, minGap: 172, maxGap: 190, speed: 2.08, storm: true, night: false },
         { name: 'NOCHE A CIEGAS', short: 'NOCHE', goal: 30, minGap: 160, maxGap: 176, speed: 2.12, gravity: .31, flap: -5.55, storm: false, night: true },
-        { name: 'EL VOLCÁN', short: 'VOLCÁN', goal: 40, minGap: 154, maxGap: 170, speed: 2.2, gravity: .31, flap: -5.55, storm: false, night: false, volcano: true }
+        { name: 'EL VOLCÁN', short: 'VOLCÁN', goal: 40, minGap: 196, maxGap: 218, speed: 2.2, gravity: .31, flap: -5.55, storm: false, night: false, volcano: true }
       ];
       const wind = { active: false, force: 0, endsAt: 0, nextAt: 420, direction: 0 };
       const volcano = { active: false, startedAt: 0, endsAt: 0, nextAt: 260, shake: 0, pulse: 0 };
-      let obstacles = [], leaves = [], score = 0, frame = 0, nightStartFrame = 0, state = 'start', best = 0, musicStarted = false;
+      let obstacles = [], leaves = [], rocks = [], score = 0, frame = 0, nightStartFrame = 0, state = 'start', best = 0, musicStarted = false, volcanoSpawnPillar = false;
 
       try { best = Number(localStorage.getItem('skyJumperBest')) || 0; } catch (_) {}
 
@@ -57,6 +57,7 @@
         player.velocity = 0;
         obstacles = [];
         leaves = [];
+        rocks = [];
         score = 0;
         frame = 0;
         nightStartFrame = 0;
@@ -69,6 +70,7 @@
         volcano.shake = 0;
         volcano.pulse = 0;
         volcano.nextAt = 260;
+        volcanoSpawnPillar = false;
         state = 'playing';
       }
 
@@ -135,12 +137,14 @@
       function enterLevel() {
         obstacles = [];
         leaves = [];
+        rocks = [];
         wind.active = false;
         wind.force = 0;
         volcano.active = false;
         volcano.shake = 0;
         volcano.pulse = 0;
         volcano.nextAt = frame + 200 + Math.floor(Math.random() * 80);
+        volcanoSpawnPillar = false;
         if (currentLevel().night) nightStartFrame = frame;
       }
 
@@ -210,19 +214,57 @@
         }
       }
 
+      // A long single-sided rock, jutting from the ceiling or the floor.
+      // It scrolls in exactly like a pipe, so the same read-and-react timing
+      // the player already knows applies — no twig to collect on it.
+      function addRockPillar() {
+        const fromTop = Math.random() < .5;
+        const baseLength = 260 + Math.random() * 140;
+        // Materializes mid-screen instead of sliding in from the edge, but
+        // stays harmless while it "forms" so there's still time to react.
+        rocks.push({
+          x: player.x + 260 + Math.random() * 160,
+          width: 64,
+          fromTop,
+          baseLength,
+          length: baseLength,
+          pulseSeed: Math.random() * Math.PI * 2,
+          solidAt: frame + 46
+        });
+      }
+
       function update() {
         if (state !== 'playing') return;
         frame++;
         const level = currentLevel();
         updateWind(level);
         updateVolcano(level);
+        if (level.volcano) {
+          if (frame % 160 === 0) {
+            if (volcanoSpawnPillar) addRockPillar(); else addObstacle();
+            volcanoSpawnPillar = !volcanoSpawnPillar;
+          }
+        } else if (frame % (level.night ? 98 : 112) === 0) {
+          addObstacle();
+        }
         player.velocity += level.gravity || physics.gravity;
         if (level.storm && wind.active) player.velocity += wind.force;
         player.y += player.velocity;
-        if (frame % (level.night ? 98 : 112) === 0) addObstacle();
 
         const px = player.x, py = player.y, ps = player.size;
         if (py < 0 || py + ps > H - groundH) gameOver();
+        for (const rock of rocks) {
+          rock.x -= level.speed;
+          // Grows and shrinks as it approaches, so the safe passage keeps changing.
+          rock.length = rock.baseLength + Math.sin((frame + rock.pulseSeed) * .045) * 40;
+          if (frame < rock.solidAt) continue;
+          const overlapX = px + ps > rock.x && px < rock.x + rock.width;
+          const blockTop = rock.fromTop ? 0 : H - groundH - rock.length;
+          const blockBottom = rock.fromTop ? rock.length : H - groundH;
+          const overlapY = py + ps > blockTop && py < blockBottom;
+          if (overlapX && overlapY) gameOver();
+        }
+        rocks = rocks.filter(rock => rock.x + rock.width > -10);
         for (const o of obstacles) {
           o.x -= level.speed;
           if (level.storm) o.top = o.baseTop + Math.sin(frame * .035 + o.swaySeed) * 9;
@@ -318,17 +360,34 @@
       }
 
       function drawBranch(x, y, glowOnly = false, burning = false) {
-        if (!glowOnly) {
-          rect(x - 14, y - 2, 28, 5, burning ? '#3a1c12' : '#75492d');
-          rect(x - 6, y - 8, 5, 13, burning ? '#3a1c12' : '#75492d');
-          rect(x + 5, y - 5, 5, 10, burning ? '#3a1c12' : '#75492d');
-        }
         if (burning) {
-          rect(x - 10, y - 10, 7, 6, '#ff8a3d');
-          rect(x + 5, y - 11, 8, 6, '#ff8a3d');
-          rect(x - 7, y - 6, 4, 4, '#ffd25e');
-          rect(x + 7, y - 7, 4, 4, '#ffd25e');
+          if (glowOnly) return;
+          // Pulsing scale + flickering colors + a soft halo make burning
+          // twigs read as dangerous even against the orange volcano backdrop.
+          const pulse = 1 + Math.sin(frame * .25) * .2;
+          const flicker = Math.sin(frame * .4) > 0;
+          const halo = ctx.createRadialGradient(x, y, 2, x, y, 24 * pulse);
+          halo.addColorStop(0, 'rgba(255,222,140,.75)');
+          halo.addColorStop(1, 'rgba(255,90,40,0)');
+          ctx.fillStyle = halo;
+          ctx.beginPath(); ctx.arc(x, y, 24 * pulse, 0, Math.PI * 2); ctx.fill();
+          rect(x - 14, y - 2, 28, 5, '#241008');
+          rect(x - 6, y - 8, 5, 13, '#241008');
+          rect(x + 5, y - 5, 5, 10, '#241008');
+          const core = flicker ? '#ffe38a' : '#ffb35e';
+          rect(x - 11 * pulse, y - 12 * pulse, 8 * pulse, 7 * pulse, '#ff5b2e');
+          rect(x + 4 * pulse, y - 13 * pulse, 9 * pulse, 7 * pulse, '#ff5b2e');
+          rect(x - 8 * pulse, y - 9 * pulse, 5 * pulse, 5 * pulse, core);
+          rect(x + 6 * pulse, y - 10 * pulse, 5 * pulse, 5 * pulse, core);
+          const emberY = y - 16 - ((frame * 1.3) % 22);
+          rect(x - 2, emberY, 2, 2, '#ffd25e');
+          rect(x + 4, emberY - 6, 2, 2, '#ff8a3d');
           return;
+        }
+        if (!glowOnly) {
+          rect(x - 14, y - 2, 28, 5, '#75492d');
+          rect(x - 6, y - 8, 5, 13, '#75492d');
+          rect(x + 5, y - 5, 5, 10, '#75492d');
         }
         const leaf = currentLevel().night ? '#e0e886' : '#9dcb55';
         rect(x - 10, y - 8, 7, 5, leaf);
@@ -336,6 +395,26 @@
         if (currentLevel().night) {
           rect(x - 7, y - 6, 4, 3, '#fbffc0');
           rect(x + 7, y - 7, 4, 3, '#fbffc0');
+        }
+      }
+
+      function drawRocks() {
+        const colors = ['#4a2016', '#7a3a24', '#2a120c', '#ff8a3d'];
+        for (const rock of rocks) {
+          const y = rock.fromTop ? 0 : H - groundH - rock.length;
+          if (frame < rock.solidAt) {
+            // Shimmering silhouette while it coalesces out of ash — visible
+            // and readable, but harmless until it solidifies.
+            const alpha = 0.28 + Math.abs(Math.sin(frame * .3)) * 0.35;
+            ctx.fillStyle = `rgba(255,138,61,${alpha})`;
+            ctx.fillRect(Math.round(rock.x), Math.round(y), Math.round(rock.width), Math.round(rock.length));
+            continue;
+          }
+          rect(rock.x, y, rock.width, rock.length, colors[0]);
+          rect(rock.x + 6, y, 9, rock.length, colors[1]);
+          rect(rock.x + rock.width - 7, y, 7, rock.length, colors[2]);
+          const edgeY = rock.fromTop ? rock.length - 15 : y;
+          rect(rock.x - 5, edgeY, rock.width + 10, 15, colors[3]);
         }
       }
 
@@ -450,6 +529,7 @@
         drawBackground();
         drawLeaves();
         obstacles.forEach(drawColumn);
+        drawRocks();
         drawGround();
         const flies = fireflies();
         drawFog(flies);
@@ -478,6 +558,12 @@
       window.addEventListener('keydown', e => {
         if (e.code === 'Space') { e.preventDefault(); jump(); }
         else if (state === 'gameover') jump();
+        else if (e.key === '4') {
+          // Debug shortcut: jump straight to the volcano level for testing.
+          if (state !== 'playing') reset();
+          score = levels[2].goal;
+          enterLevel();
+        }
       });
       canvas.addEventListener('pointerdown', event => {
         event.preventDefault();
